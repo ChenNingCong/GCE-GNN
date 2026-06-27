@@ -4,14 +4,18 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='diginetica', help='diginetica/Tmall/Nowplaying')
 parser.add_argument('--sample_num', type=int, default=12)
+parser.add_argument('--data_dir', default='datasets', help='root holding <dataset>/')
+parser.add_argument('--num_node', type=int, default=0, help='item count+1; >0 overrides builtin map')
 opt = parser.parse_args()
 
 dataset = opt.dataset
 sample_num = opt.sample_num
 
-seq = pickle.load(open('datasets/' + dataset + '/all_train_seq.txt', 'rb'))
+seq = pickle.load(open(opt.data_dir + '/' + dataset + '/all_train_seq.txt', 'rb'))
 
-if dataset == 'diginetica':
+if opt.num_node > 0:
+    num = opt.num_node
+elif dataset == 'diginetica':
     num = 43098
 elif dataset == "Tmall":
     num = 40728
@@ -52,5 +56,5 @@ for i in range(num):
     adj[i] = adj[i][:sample_num]
     weight[i] = weight[i][:sample_num]
 
-pickle.dump(adj, open('datasets/' + dataset + '/adj_' + str(sample_num) + '.pkl', 'wb'))
-pickle.dump(weight, open('datasets/' + dataset + '/num_' + str(sample_num) + '.pkl', 'wb'))
+pickle.dump(adj, open(opt.data_dir + '/' + dataset + '/adj_' + str(sample_num) + '.pkl', 'wb'))
+pickle.dump(weight, open(opt.data_dir + '/' + dataset + '/num_' + str(sample_num) + '.pkl', 'wb'))

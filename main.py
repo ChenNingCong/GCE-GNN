@@ -38,6 +38,8 @@ parser.add_argument('--patience', type=int, default=3)
 parser.add_argument('--wandb', action='store_true', help='log metrics to wandb')
 parser.add_argument('--compile', action='store_true', help='torch.compile the model')
 parser.add_argument('--run_name', type=str, default='')
+parser.add_argument('--data_dir', type=str, default='datasets', help='root holding <dataset>/')
+parser.add_argument('--num_node', type=int, default=0, help='item count+1; >0 overrides the builtin map')
 
 opt = parser.parse_args()
 
@@ -49,7 +51,10 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
 
-    if opt.dataset == 'diginetica':
+    if opt.num_node > 0:
+        # custom dataset (e.g. our Steam data): use CLI hyperparams as given
+        num_node = opt.num_node
+    elif opt.dataset == 'diginetica':
         num_node = 43098
         opt.n_iter = 2
         opt.dropout_gcn = 0.2
@@ -67,22 +72,24 @@ def main():
     else:
         num_node = 310
 
-    train_data = pickle.load(open('datasets/' + opt.dataset + '/train.txt', 'rb'))
+    train_data = pickle.load(open(opt.data_dir + '/' + opt.dataset + '/train.txt', 'rb'))
     if opt.validation:
         train_data, valid_data = split_validation(train_data, opt.valid_portion)
         test_data = valid_data
     else:
-        test_data = pickle.load(open('datasets/' + opt.dataset + '/test.txt', 'rb'))
+        test_data = pickle.load(open(opt.data_dir + '/' + opt.dataset + '/test.txt', 'rb'))
 
-    adj = pickle.load(open('datasets/' + opt.dataset + '/adj_' + str(opt.n_sample_all) + '.pkl', 'rb'))
-    num = pickle.load(open('datasets/' + opt.dataset + '/num_' + str(opt.n_sample_all) + '.pkl', 'rb'))
+    adj = pickle.load(open(opt.data_dir + '/' + opt.dataset + '/adj_' + str(opt.n_sample_all) + '.pkl', 'rb'))
+    num = pickle.load(open(opt.data_dir + '/' + opt.dataset + '/num_' + str(opt.n_sample_all) + '.pkl', 'rb'))
     train_data = Data(train_data)
     test_data = Data(test_data)
 
     adj, num = handle_adj(adj, num_node, opt.n_sample_all, num)
     model = trans_to_cuda(CombineGraph(opt, num_node, adj, num))
     if opt.compile:
-        model = torch.compile(model)
+        # dynamic=True: compile once for variable batch sizes (last batch / eval),
+        # otherwise each new shape triggers a recompile and erases the speedup.
+        model = torch.compile(model, dynamic=True)
 
     if opt.wandb:
         wandb.init(project='srec-gcegnn', name=(opt.run_name or None), config=vars(opt))
