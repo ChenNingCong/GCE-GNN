@@ -1,6 +1,7 @@
 import time
 import argparse
 import pickle
+import wandb
 from model import *
 from utils import *
 
@@ -34,12 +35,19 @@ parser.add_argument('--validation', action='store_true', help='validation')
 parser.add_argument('--valid_portion', type=float, default=0.1, help='split the portion')
 parser.add_argument('--alpha', type=float, default=0.2, help='Alpha for the leaky_relu.')
 parser.add_argument('--patience', type=int, default=3)
+parser.add_argument('--wandb', action='store_true', help='log metrics to wandb')
+parser.add_argument('--compile', action='store_true', help='torch.compile the model')
+parser.add_argument('--run_name', type=str, default='')
 
 opt = parser.parse_args()
 
 
 def main():
     init_seed(2020)
+
+    # Keep full fp32 precision (no TF32) so matmuls match the original numerics exactly.
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
 
     if opt.dataset == 'diginetica':
         num_node = 43098
@@ -73,6 +81,11 @@ def main():
 
     adj, num = handle_adj(adj, num_node, opt.n_sample_all, num)
     model = trans_to_cuda(CombineGraph(opt, num_node, adj, num))
+    if opt.compile:
+        model = torch.compile(model)
+
+    if opt.wandb:
+        wandb.init(project='srec-gcegnn', name=(opt.run_name or None), config=vars(opt))
 
     print(opt)
     start = time.time()
@@ -98,12 +111,19 @@ def main():
         print('Best Result:')
         print('\tRecall@20:\t%.4f\tMMR@20:\t%.4f\tEpoch:\t%d,\t%d' % (
             best_result[0], best_result[1], best_epoch[0], best_epoch[1]))
+        if opt.wandb:
+            wandb.log({'epoch': epoch, 'recall@20': hit, 'mrr@20': mrr,
+                       'best_recall@20': best_result[0], 'best_mrr@20': best_result[1]})
         bad_counter += 1 - flag
         if bad_counter >= opt.patience:
             break
     print('-------------------------------------------------------')
     end = time.time()
     print("Run time: %f s" % (end - start))
+    if opt.wandb:
+        wandb.summary['final_recall@20'] = best_result[0]
+        wandb.summary['final_mrr@20'] = best_result[1]
+        wandb.finish()
 
 
 if __name__ == '__main__':

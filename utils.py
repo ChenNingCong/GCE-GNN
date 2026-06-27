@@ -65,13 +65,16 @@ class Data(Dataset):
         max_n_node = self.max_len
         node = np.unique(u_input)
         items = node.tolist() + (max_n_node - len(node)) * [0]
+        # node is sorted, so np.where(node==x)[0][0] == position of x in node.
+        # Use an O(1) dict instead of O(N) np.where scans (exact same indices/logic).
+        pos = {v: i for i, v in enumerate(node.tolist())}
         adj = np.zeros((max_n_node, max_n_node))
-        for i in np.arange(len(u_input) - 1):
-            u = np.where(node == u_input[i])[0][0]
+        for i in range(len(u_input) - 1):
+            u = pos[u_input[i]]
             adj[u][u] = 1
             if u_input[i + 1] == 0:
                 break
-            v = np.where(node == u_input[i + 1])[0][0]
+            v = pos[u_input[i + 1]]
             if u == v or adj[u][v] == 4:
                 continue
             adj[v][v] = 1
@@ -82,7 +85,7 @@ class Data(Dataset):
                 adj[u][v] = 2
                 adj[v][u] = 3
 
-        alias_inputs = [np.where(node == i)[0][0] for i in u_input]
+        alias_inputs = [pos[i] for i in u_input]
 
         return [torch.tensor(alias_inputs), torch.tensor(adj), torch.tensor(items),
                 torch.tensor(mask), torch.tensor(target), torch.tensor(u_input)]

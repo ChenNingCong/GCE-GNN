@@ -189,7 +189,7 @@ def train_test(model, train_data, test_data):
         loss = model.loss_function(scores, targets - 1)
         loss.backward()
         model.optimizer.step()
-        total_loss += loss
+        total_loss += loss.item()  # .item(): don't retain the autograd graph across the epoch
     print('\tLoss:\t%.3f' % total_loss)
     model.scheduler.step()
 
