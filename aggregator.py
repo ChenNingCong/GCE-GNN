@@ -32,22 +32,20 @@ class LocalAggregator(nn.Module):
         self.leakyrelu = nn.LeakyReLU(alpha)
 
     def forward(self, hidden, adj, mask_item=None):
+        # Vectorized (modernize): the original materialized a_input of shape
+        # (B, N, N, dim) (~190MB/batch at N=69) then 4 matmuls. The score for edge
+        # (i,j) of type t is leakyrelu( sum_d h[i,d]*a_t[d]*h[j,d] ) = leakyrelu((h*a_t) @ h^T),
+        # so we never build the (B,N,N,dim) tensor. Same fp32 math (see tests/).
         h = hidden
-        batch_size = h.shape[0]
-        N = h.shape[1]
 
-        a_input = (h.repeat(1, 1, N).view(batch_size, N * N, self.dim)
-                   * h.repeat(1, N, 1)).view(batch_size, N, N, self.dim)
+        def edge_scores(a):  # a: (dim, 1) -> (B, N, N)
+            return self.leakyrelu(torch.matmul(h * a.view(1, 1, self.dim),
+                                               h.transpose(1, 2)))
 
-        e_0 = torch.matmul(a_input, self.a_0)
-        e_1 = torch.matmul(a_input, self.a_1)
-        e_2 = torch.matmul(a_input, self.a_2)
-        e_3 = torch.matmul(a_input, self.a_3)
-
-        e_0 = self.leakyrelu(e_0).squeeze(-1).view(batch_size, N, N)
-        e_1 = self.leakyrelu(e_1).squeeze(-1).view(batch_size, N, N)
-        e_2 = self.leakyrelu(e_2).squeeze(-1).view(batch_size, N, N)
-        e_3 = self.leakyrelu(e_3).squeeze(-1).view(batch_size, N, N)
+        e_0 = edge_scores(self.a_0)
+        e_1 = edge_scores(self.a_1)
+        e_2 = edge_scores(self.a_2)
+        e_3 = edge_scores(self.a_3)
 
         mask = -9e15 * torch.ones_like(e_0)
         alpha = torch.where(adj.eq(1), e_0, mask)
