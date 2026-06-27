@@ -169,8 +169,10 @@ def forward(model, data):
     inputs = trans_to_cuda(inputs).long()
 
     hidden = model(items, adj, mask, inputs)
-    get = lambda index: hidden[index][alias_inputs[index]]
-    seq_hidden = torch.stack([get(i) for i in torch.arange(len(alias_inputs)).long()])
+    # vectorized gather (exact, no numerics change): seq_hidden[b,t] = hidden[b, alias_inputs[b,t]]
+    # replaces the per-sample Python loop torch.stack([hidden[i][alias_inputs[i]] ...]).
+    bidx = torch.arange(alias_inputs.size(0), device=alias_inputs.device).unsqueeze(1)
+    seq_hidden = hidden[bidx, alias_inputs]
     return targets, model.compute_scores(seq_hidden, mask)
 
 
