@@ -176,11 +176,16 @@ def forward(model, data):
     return targets, model.compute_scores(seq_hidden, mask)
 
 
-def train_test(model, train_data, test_data):
+def train_test(model, train_data, test_data, on_step=None):
+    """Train one epoch, then evaluate. Returns a metrics dict.
+
+    on_step(loss_float): optional per-batch callback (e.g. for a wandb loss curve).
+    """
     print('start training: ', datetime.datetime.now())
     model.train()
     total_loss = 0.0
-    train_loader = torch.utils.data.DataLoader(train_data, num_workers=4, batch_size=model.batch_size,
+    n_batches = 0
+    train_loader = torch.utils.data.DataLoader(train_data, num_workers=3, batch_size=model.batch_size,
                                                shuffle=True, pin_memory=True)
     for data in tqdm(train_loader):
         model.optimizer.zero_grad()
@@ -189,29 +194,38 @@ def train_test(model, train_data, test_data):
         loss = model.loss_function(scores, targets - 1)
         loss.backward()
         model.optimizer.step()
-        total_loss += loss.item()  # .item(): don't retain the autograd graph across the epoch
+        l = loss.item()  # .item(): don't retain the autograd graph across the epoch
+        total_loss += l
+        n_batches += 1
+        if on_step is not None:
+            on_step(l)
+    mean_loss = total_loss / max(n_batches, 1)
     print('\tLoss:\t%.3f' % total_loss)
+    lr = model.optimizer.param_groups[0]['lr']
     model.scheduler.step()
 
     print('start predicting: ', datetime.datetime.now())
     model.eval()
-    test_loader = torch.utils.data.DataLoader(test_data, num_workers=4, batch_size=model.batch_size,
+    test_loader = torch.utils.data.DataLoader(test_data, num_workers=3, batch_size=model.batch_size,
                                               shuffle=False, pin_memory=True)
-    result = []
-    hit, mrr = [], []
+    hit20, mrr20, hit10, mrr10 = [], [], [], []
     for data in test_loader:
         targets, scores = forward(model, data)
         sub_scores = scores.topk(20)[1]
         sub_scores = trans_to_cpu(sub_scores).detach().numpy()
         targets = targets.numpy()
-        for score, target, mask in zip(sub_scores, targets, test_data.mask):
-            hit.append(np.isin(target - 1, score))
-            if len(np.where(score == target - 1)[0]) == 0:
-                mrr.append(0)
-            else:
-                mrr.append(1 / (np.where(score == target - 1)[0][0] + 1))
+        for score, target in zip(sub_scores, targets):
+            t = target - 1
+            hit20.append(np.isin(t, score))
+            pos = np.where(score == t)[0]
+            mrr20.append(0 if len(pos) == 0 else 1 / (pos[0] + 1))
+            s10 = score[:10]
+            hit10.append(np.isin(t, s10))
+            pos10 = np.where(s10 == t)[0]
+            mrr10.append(0 if len(pos10) == 0 else 1 / (pos10[0] + 1))
 
-    result.append(np.mean(hit) * 100)
-    result.append(np.mean(mrr) * 100)
-
-    return result
+    return {
+        'recall@20': float(np.mean(hit20) * 100), 'mrr@20': float(np.mean(mrr20) * 100),
+        'recall@10': float(np.mean(hit10) * 100), 'mrr@10': float(np.mean(mrr10) * 100),
+        'train_loss': float(mean_loss), 'total_loss': float(total_loss), 'lr': float(lr),
+    }

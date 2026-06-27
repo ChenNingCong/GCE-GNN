@@ -93,10 +93,17 @@ def main():
     best_epoch = [0, 0]
     bad_counter = 0
 
+    def on_step(loss_val):
+        if opt.wandb:
+            wandb.log({'train/loss': loss_val})
+
     for epoch in range(opt.epoch):
         print('-------------------------------------------------------')
         print('epoch: ', epoch)
-        hit, mrr = train_test(model, train_data, test_data)
+        t0 = time.time()
+        res = train_test(model, train_data, test_data, on_step=on_step)
+        epoch_time = time.time() - t0
+        hit, mrr = res['recall@20'], res['mrr@20']
         flag = 0
         if hit >= best_result[0]:
             best_result[0] = hit
@@ -112,8 +119,13 @@ def main():
         print('\tRecall@20:\t%.4f\tMMR@20:\t%.4f\tEpoch:\t%d,\t%d' % (
             best_result[0], best_result[1], best_epoch[0], best_epoch[1]))
         if opt.wandb:
-            wandb.log({'epoch': epoch, 'recall@20': hit, 'mrr@20': mrr,
-                       'best_recall@20': best_result[0], 'best_mrr@20': best_result[1]})
+            wandb.log({
+                'epoch': epoch, 'epoch_time_s': epoch_time,
+                'train/epoch_loss': res['train_loss'], 'train/lr': res['lr'],
+                'eval/recall@20': hit, 'eval/mrr@20': mrr,
+                'eval/recall@10': res['recall@10'], 'eval/mrr@10': res['mrr@10'],
+                'eval/best_recall@20': best_result[0], 'eval/best_mrr@20': best_result[1],
+            })
         bad_counter += 1 - flag
         if bad_counter >= opt.patience:
             break
